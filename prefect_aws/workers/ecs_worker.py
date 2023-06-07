@@ -58,11 +58,10 @@ import anyio
 import anyio.abc
 import boto3
 import yaml
-from prefect.docker import get_prefect_image_name
 from prefect.exceptions import InfrastructureNotAvailable, InfrastructureNotFound
-from prefect.logging.loggers import get_logger
 from prefect.server.schemas.core import FlowRun
 from prefect.utilities.asyncutils import run_sync_in_worker_thread
+from prefect.utilities.dockerutils import get_prefect_image_name
 from prefect.workers.base import (
     BaseJobConfiguration,
     BaseVariables,
@@ -318,6 +317,10 @@ class ECSJobConfiguration(BaseJobConfiguration):
 
 
 class ECSVariables(BaseVariables):
+    """
+    Variables for templating an ECS job.
+    """
+
     task_definition_arn: Optional[str] = Field(
         default=None,
         description=(
@@ -490,21 +493,27 @@ class ECSVariables(BaseVariables):
 
 
 class ECSWorkerResult(BaseWorkerResult):
-    pass
+    """
+    The result of an ECS job.
+    """
 
 
 class ECSWorker(BaseWorker):
+    """
+    A Prefect worker to run flow runs as ECS tasks.
+    """
+
     type = "ecs"
     job_configuration = ECSJobConfiguration
     job_configuration_variables = ECSVariables
-
-    def get_logger(self, flow_run: FlowRun):
-        """
-        Get a logger for the given flow run.
-        """
-        # This could stream to the API in the future; should be implemented on the base
-        # worker class
-        return get_logger("prefect.workers.ecs").getChild(slugify(flow_run.name))
+    _description = (
+        "Execute flow runs within containers on AWS ECS. Works with existing ECS "
+        "clusters and serverless execution via AWS Fargate. Requires an AWS account."
+    )
+    _display_name = "AWS Elastic Container Service"
+    _documentation_url = "https://prefecthq.github.io/prefect-aws/ecs_worker/"
+    _is_beta = True
+    _logo_url = "https://images.ctfassets.net/gm98wzqotmnx/1jbV4lceHOjGgunX15lUwT/db88e184d727f721575aeb054a37e277/aws.png?h=250"  # noqa
 
     async def run(
         self,
@@ -519,7 +528,7 @@ class ECSWorker(BaseWorker):
             self._get_session_and_client, configuration
         )
 
-        logger = self.get_logger(flow_run)
+        logger = self.get_flow_run_logger(flow_run)
 
         (
             task_arn,
@@ -1454,15 +1463,15 @@ class ECSWorker(BaseWorker):
     async def kill_infrastructure(
         self,
         configuration: ECSJobConfiguration,
-        identifier: str,
+        infrastructure_pid: str,
         grace_seconds: int = 30,
     ) -> None:
         """
         Kill a task running on ECS.
 
         Args:
-            identifier: A cluster and task arn combination. This should match a value
-                yielded by `ECSTask.run`.
+            infrastructure_pid: A cluster and task arn combination. This should match a
+                value yielded by `ECSWorker.run`.
         """
         if grace_seconds != 30:
             self._logger.warning(
@@ -1470,7 +1479,7 @@ class ECSWorker(BaseWorker):
                 "support dynamic grace period configuration so 30s will be used. "
                 "See https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-agent-config.html for configuration of grace periods."  # noqa
             )
-        cluster, task = parse_identifier(identifier)
+        cluster, task = parse_identifier(infrastructure_pid)
         await run_sync_in_worker_thread(self._stop_task, configuration, cluster, task)
 
     def _stop_task(

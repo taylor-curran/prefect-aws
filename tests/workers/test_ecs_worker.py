@@ -670,7 +670,9 @@ async def test_task_definition_arn_with_variables_that_are_ignored(
     )
 
     async with ECSWorker(work_pool_name="test") as worker:
-        with caplog.at_level(logging.INFO, logger=worker.get_logger(flow_run).name):
+        with caplog.at_level(
+            logging.INFO, logger=worker.get_flow_run_logger(flow_run).name
+        ):
             result = await run_then_stop_task(worker, configuration, flow_run)
 
     assert result.status_code == 0
@@ -1764,7 +1766,9 @@ async def test_kill_infrastructure(aws_credentials, cluster: str, flow_run):
             async with anyio.create_task_group() as tg:
                 identifier = await tg.start(worker.run, flow_run, configuration)
 
-                await worker.kill_infrastructure(configuration, identifier)
+                await worker.kill_infrastructure(
+                    configuration=configuration, infrastructure_pid=identifier
+                )
 
     _, task_arn = parse_identifier(identifier)
     task = describe_task(ecs_client, task_arn)
